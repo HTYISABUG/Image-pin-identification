@@ -7,10 +7,8 @@ from pprint import pprint
 import tensorflow as tf
 import numpy as np
 import cv2
+from tensorflow import keras
 
-from model import Model
-import util
-from batcher import batch_generator
 import make_data
 
 _FLAGS = tf.app.flags.FLAGS
@@ -25,6 +23,7 @@ tf.app.flags.DEFINE_integer('height',      50,  'height of image')
 tf.app.flags.DEFINE_integer('batch_size',  16,  'batch size')
 tf.app.flags.DEFINE_integer('num_classes', 16,  'number of classes')
 tf.app.flags.DEFINE_integer('hidden_dim',  256, 'dimention of hidden layer')
+tf.app.flags.DEFINE_integer('epochs',      100, 'round of training')
 
 tf.app.flags.DEFINE_float('lr',               0.15, 'learning rate')
 tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1,  'initial accumulator value for Adagrad')
@@ -36,68 +35,59 @@ def main(unused_args):
         if _FLAGS.mode == 'train': os.makedirs(_FLAGS.log_dir)
         else: raise Exception("Logdir %s doesn't exist. Run in train mode to create it." % (_FLAGS.log_dir))
 
-    hps_name = ['width', 'height', 'batch_size', 'num_classes', 'num_targets', 'hidden_dim',
-                'lr', 'adagrad_init_acc']
-    hps = {}
-
-    for k, v in _FLAGS.__flags.items():
-        if k in hps_name: hps[k] = v.value
-
-    hps = namedtuple('HyperParams', hps.keys())(**hps)
-
     images, labels = make_data.read_data(_FLAGS.image_path, _FLAGS.label_path)
-    train_data, val_data, test_data = make_data.split_data(images, labels)
-
-    model = Model(hps)
+    train_data, test_data = make_data.split_data(images, labels)
 
     if _FLAGS.mode == 'train':
-        run_training(model, train_data, val_data)
+        model = build_model()
+        run_training(model, train_data)
     elif _FLAGS.mode == 'eval':
-        pass
+        model = keras.models.load_model(os.path.join(_FLAGS.log_dir, 'weight.best.hdf5'))
+        run_evaluate(model, test_data)
     elif _FLAGS.mode == 'iden':
-        run_identify(model)
+        model = keras.models.load_model(os.path.join(_FLAGS.log_dir, 'weight.best.hdf5'))
+        run_identify()
     else:
         raise ValueError("The 'mode' flag must be one of train/eval/iden")
 
-def run_training(model, train_data, val_data):
+def build_model():
 
-    tf.logging.set_verbosity(tf.logging.INFO)
+    hdf5_path = os.path.join(_FLAGS.log_dir, 'weight.best.hdf5')
 
-    if not os.path.exists(_FLAGS.log_dir): os.makedirs(_FLAGS.log_dir)
+    if os.path.exists(hdf5_path):
+        return keras.models.load_model(hdf5_path)
 
-    model.build()
+    model = keras.Sequential()
 
-    try:
-        sess_params = {
-            'checkpoint_dir': _FLAGS.log_dir,
-            'config': util.get_config(),
-            'hooks': model.sess_hooks
-        }
+    model.add(keras.layers.Conv2D(32, (3, 3), activation='relu', input_shape=(_FLAGS.height, _FLAGS.width, 1)))
+    model.add(keras.layers.MaxPool2D())
+    model.add(keras.layers.Conv2D(64, (3, 3), activation='relu'))
+    model.add(keras.layers.MaxPool2D())
+    model.add(keras.layers.Dropout(0.25))
+    model.add(keras.layers.Flatten())
 
-        with tf.train.MonitoredTrainingSession(**sess_params) as sess:
-            tf.logging.info('starting run_training')
+    model.add(keras.layers.Dense(_FLAGS.hidden_dim, activation='relu'))
+    model.add(keras.layers.Dropout(0.5))
 
-            generator = batch_generator(train_data, _FLAGS.batch_size)
+    model.add(keras.layers.Dense(_FLAGS.num_classes, activation='softmax'))
 
-            while True:
-                tf.logging.info('running training step...')
+    model.compile(optimizer='adagrad', loss='categorical_crossentropy', metrics=['accuracy'])
 
-                ts = time.time()
+    return model
 
-                batch = next(generator)
+def run_training(model, data):
+    model.fit(x=data.images,
+              y=data.labels,
+              batch_size=_FLAGS.batch_size,
+              epochs=_FLAGS.epochs,
+              validation_split=0.1,
+              callbacks=[keras.callbacks.TensorBoard(log_dir=_FLAGS.log_dir),
+                         keras.callbacks.ModelCheckpoint(os.path.join(_FLAGS.log_dir, 'weight.best.hdf5'), save_best_only=True)])
 
-                result = model.run_training(sess, batch)
+def run_evaluate(model, data):
+    predicts = model.predict(data.images)
 
-                tf.logging.info('seconds for training step: %.3f', time.time() - ts)
-                tf.logging.info('loss: %f', result['loss'])
-
-                cross_val = model.run_identify(sess._tf_sess(), val_data.images)
-                accuracy  = np.mean(cross_val == val_data.labels)
-
-                tf.logging.info('cross validation accuracy: %f', accuracy)
-
-    except KeyboardInterrupt:
-        tf.logging.info('Caught keyboard interrupt on worker. Stopping supervisor...')
+    print('accuracy on test set: %f' % (np.mean(np.argmax(predicts, axis=1) == np.argmax(data.labels, axis=1))))
 
 def run_identify(model):
     image_list = sorted(glob.glob(_FLAGS.image_path), key=lambda path: int(os.path.basename(path).rstrip('.png')))
@@ -106,17 +96,7 @@ def run_identify(model):
     images = np.array(images) / 255
     images = np.expand_dims(images, axis=-1)
 
-    with tf.device('/cpu:0'):
-        model.build()
-
-    saver = tf.train.Saver()
-
-    with tf.Session(config=util.get_config()) as sess:
-        util.load_ckpt(sess, saver, _FLAGS.log_dir)
-
-        labels = model.run_identify(sess, images).T[0]
-
-        for label in labels: print('0123456789ABCDEF'[label])
+    predict = model.predict(images, batch_size=len(images))
 
 if __name__ == '__main__':
     tf.app.run()
