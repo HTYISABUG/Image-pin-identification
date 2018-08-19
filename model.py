@@ -12,7 +12,7 @@ class Model(object):
         hps = self.__hps
 
         self.__image_batch = tf.placeholder(tf.float32, [None, hps.height, hps.width, 1], name='image_batch')
-        self.__label_batch = tf.placeholder(tf.int32, [None, hps.num_targets], name='label_batch')
+        self.__label_batch = tf.placeholder(tf.int32, [None, 1], name='label_batch')
 
         self.__global_step = tf.train.get_or_create_global_step()
 
@@ -22,6 +22,8 @@ class Model(object):
         logits      = self.__build_classifier(hiddens)
         loss        = self.__build_loss(logits)
         train_op    = self.__build_train_op(loss)
+
+        tf.summary.scalar('loss', loss)
 
         self.__logits   = logits
         self.__loss     = loss
@@ -49,7 +51,7 @@ class Model(object):
         hps = self.__hps
 
         with tf.variable_scope('hidden'):
-            hidden = tf.layers.dense(convs, 256, activation=tf.nn.relu, name='hidden')
+            hidden = tf.layers.dense(convs, hps.hidden_dim, activation=tf.nn.relu, name='hidden')
             output = tf.layers.dropout(hidden)
 
             return output
@@ -58,22 +60,15 @@ class Model(object):
         hps = self.__hps
 
         with tf.variable_scope('classifier'):
-            outputs = [tf.layers.dense(hiddens, hps.num_classes, name='dense_%d' % (i)) for i in range(hps.num_targets)]
+            output = tf.layers.dense(hiddens, hps.num_classes)
 
-            return outputs
+            return output
 
     def __build_loss(self, logits):
         hps = self.__hps
 
         with tf.variable_scope('loss'):
-            losses = []
-
-            for i in range(hps.num_targets):
-                losses.append(tf.losses.sparse_softmax_cross_entropy(self.__label_batch[:, i], logits[i]))
-
-            loss = tf.reduce_sum(losses)
-
-            tf.summary.scalar('loss', loss)
+            loss = tf.losses.sparse_softmax_cross_entropy(self.__label_batch, logits)
 
             return loss
 
@@ -105,8 +100,7 @@ class Model(object):
             prob = exp / np.sum(exp, axis=1)[:, np.newaxis]
             return prob
 
-        probs  = [softmax(logit) for logit in logits]
-        labels = np.array([np.argmax(prob, axis=1) for prob in probs]).T
+        probs  = softmax(logits)
+        labels = np.array(np.argmax(probs, axis=1))[np.newaxis].T
 
-        for label in labels:
-            print(''.join(['0123456789ABCDEF'[c] for c in label]))
+        return labels
