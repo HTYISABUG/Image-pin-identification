@@ -13,10 +13,10 @@ import make_data
 
 _FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_string('mode',      'train', 'must be one of train/eval/iden')
+tf.app.flags.DEFINE_string('mode',       'train', 'must be one of train/eval/iden')
 tf.app.flags.DEFINE_string('image_path', '',        'image path')
 tf.app.flags.DEFINE_string('label_path', '',        'label path')
-tf.app.flags.DEFINE_string('log_dir',   'logs',     'directory for logging.')
+tf.app.flags.DEFINE_string('log_dir',    'logs',     'directory for logging.')
 
 tf.app.flags.DEFINE_integer('width',       250, 'width of image')
 tf.app.flags.DEFINE_integer('height',      50,  'height of image')
@@ -46,7 +46,7 @@ def main(unused_args):
         run_evaluate(model, test_data)
     elif _FLAGS.mode == 'iden':
         model = keras.models.load_model(os.path.join(_FLAGS.log_dir, 'weight.best.hdf5'))
-        run_identify()
+        run_identify(model)
     else:
         raise ValueError("The 'mode' flag must be one of train/eval/iden")
 
@@ -93,10 +93,15 @@ def run_identify(model):
     image_list = sorted(glob.glob(_FLAGS.image_path), key=lambda path: int(os.path.basename(path).rstrip('.png')))
     images = [cv2.imread(image, cv2.IMREAD_GRAYSCALE) for image in image_list]
 
-    images = np.array(images) / 255
+    images = np.array(images, dtype=np.float32) / 255
     images = np.expand_dims(images, axis=-1)
 
-    predict = model.predict(images, batch_size=len(images))
+    predicts = model.predict(images)
+
+    for l in np.argmax(predicts, axis=1):
+        print('0123456789ABCDEF'[l])
 
 if __name__ == '__main__':
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
     tf.app.run()

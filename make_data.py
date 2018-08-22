@@ -31,9 +31,11 @@ def read_data(image_path, label_path):
 
     images = np.array(images, dtype=np.float32) / 255
     images = np.expand_dims(images, axis=-1)
-    labels = np.eye(len(labels), 16)[np.array(labels)]
 
-    return images, labels
+    labels_ = np.zeros((len(labels), 16))
+    labels_[np.arange(len(labels)), labels] = 1
+
+    return images, labels_
 
 def split_data(images, labels):
     num_image = len(images)
@@ -46,10 +48,10 @@ def split_data(images, labels):
     split_images = np.array_split(images, total_ratio)
     split_labels = np.array_split(labels, total_ratio)
 
-    train_data = {'images': np.vstack(split_images[:_TRAIN_RATIO]),
-                  'labels': np.vstack(split_labels[:_TRAIN_RATIO])}
-    test_data  = {'images': np.vstack(split_images[_TRAIN_RATIO:]),
-                  'labels': np.vstack(split_labels[_TRAIN_RATIO:])}
+    train_data = {'images': np.vstack(split_images[:_TRAIN_RATIO]) if len(images) >= total_ratio else images,
+                  'labels': np.vstack(split_labels[:_TRAIN_RATIO]) if len(labels) >= total_ratio else labels}
+    test_data  = {'images': np.vstack(split_images[_TRAIN_RATIO:]) if len(images) >= total_ratio else images,
+                  'labels': np.vstack(split_labels[_TRAIN_RATIO:]) if len(labels) >= total_ratio else labels}
 
     dataset = namedtuple('Dataset', ['images', 'labels'])
 
