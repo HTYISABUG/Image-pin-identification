@@ -3,6 +3,8 @@ import glob
 import argparse
 from pprint import pprint
 from collections import namedtuple
+import pickle
+import sys
 
 import cv2
 import numpy as np
@@ -56,3 +58,23 @@ def split_data(images, labels):
     dataset = namedtuple('Dataset', ['images', 'labels'])
 
     return dataset(**train_data), dataset(**test_data)
+
+def write2bin(images, labels):
+    idx = 0
+
+    while os.path.exists('%d.pickle' % (idx)):
+        idx += 1
+
+    pickle.dump({'images': images, 'labels': labels}, open('%d.pickle' % (idx), 'wb'))
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('image_path', help='Image path. You can use wildcard to input multiple images.')
+    parser.add_argument('label_path', help='Path of label.csv.')
+
+    args = parser.parse_args()
+
+    images, labels = read_data(args.image_path, args.label_path)
+    write2bin(images, labels)
